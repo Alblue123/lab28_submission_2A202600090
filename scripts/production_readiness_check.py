@@ -49,12 +49,37 @@ check("Redis reachable", lambda:
 
 print("\n=== KAFKA ===")
 def check_kafka_topics():
-    result = subprocess.run(
-        ["docker", "exec", "lab28-kafka-1", "kafka-topics", "--list",
-         "--bootstrap-server", "localhost:9092"],
-        capture_output=True, text=True
-    )
-    assert "data.raw" in result.stdout
+    # Detect the correct Kafka container name dynamically
+    container_candidates = ["day281-kafka-1", "lab28-kafka-1", "day28-kafka-1", "kafka"]
+    last_err = ""
+    for container in container_candidates:
+        result = subprocess.run(
+            ["docker", "exec", container, "kafka-topics", "--list",
+             "--bootstrap-server", "localhost:9092"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            assert "data.raw" in result.stdout, "data.raw topic not found in Kafka"
+            return
+        last_err = result.stderr.strip() if result.stderr else f"Exit code {result.returncode}"
+    
+    # Fallback: check if we can run it using docker ps to find any kafka container
+    try:
+        ps_res = subprocess.run(["docker", "ps", "--format", "{{.Names}}"], capture_output=True, text=True)
+        for line in ps_res.stdout.splitlines():
+            if "kafka" in line:
+                result = subprocess.run(
+                    ["docker", "exec", line, "kafka-topics", "--list",
+                     "--bootstrap-server", "localhost:9092"],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    assert "data.raw" in result.stdout, "data.raw topic not found in Kafka"
+                    return
+    except Exception:
+        pass
+
+    raise Exception(f"Failed to query Kafka topics. Last error: {last_err}")
 
 check("Kafka topics exist", check_kafka_topics)
 

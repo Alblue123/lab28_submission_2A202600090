@@ -32,10 +32,23 @@ class TestDataIngestion:
         from kafka import KafkaProducer
         import json
 
-        producer = KafkaProducer(
-            bootstrap_servers="localhost:9092",
-            value_serializer=lambda v: json.dumps(v).encode()
-        )
+        bootstrap_servers = ["localhost:29092", "localhost:9092"]
+        producer = None
+        for server in bootstrap_servers:
+            try:
+                producer = KafkaProducer(
+                    bootstrap_servers=server,
+                    value_serializer=lambda v: json.dumps(v).encode(),
+                    request_timeout_ms=5000,
+                    api_version=(0, 10)
+                )
+                print(f"Test connected to Kafka broker: {server}")
+                break
+            except Exception as e:
+                print(f"Test could not connect to {server}: {e}")
+
+        assert producer is not None, "Failed to connect to any Kafka broker"
+
         producer.send("data.raw", {"id": "smoke_001", "text": "smoke test document"})
         producer.flush()
 

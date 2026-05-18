@@ -14,24 +14,27 @@ services:
     image: confluentinc/cp-kafka:7.5.0
     depends_on: [zookeeper]
     ports:
+      - "29092:29092"
       - "9092:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
   # ── Prefect ───────────────────────────────────────────────
   prefect-orion:
-    image: prefecthq/prefect:2.14.0-python3.10
-    command: prefect orion start --host 0.0.0.0
+    image: prefecthq/prefect:3-python3.10
+    command: prefect server start --host 0.0.0.0
     ports:
       - "4200:4200"
     volumes:
       - prefect_data:/root/.prefect
 
   prefect-worker:
-    image: prefecthq/prefect:2.14.0-python3.10
+    image: prefecthq/prefect:3-python3.10
     command: prefect worker start -p docker -n lab28-worker
     environment:
       PREFECT_API_URL: http://prefect-orion:4200/api
@@ -77,10 +80,36 @@ services:
     ports:
       - "8000:8000"
     environment:
-      VLLM_URL: ${VLLM_NGROK_URL}
+      VLLM_URL: http://mock-kaggle:8001
       QDRANT_URL: http://qdrant:6333
       REDIS_URL: redis://redis:6379
-    depends_on: [qdrant, redis]
+    depends_on: [qdrant, redis, mock-kaggle]
+
+  # ── Mock Kaggle GPU Service ──────────────────────────────
+  mock-kaggle:
+    image: python:3.10-slim
+    command: >
+      bash -c "pip install fastapi uvicorn && python /scripts/mock_kaggle.py"
+    ports:
+      - "8091:8001"
+    volumes:
+      - ./scripts:/scripts
+    depends_on: [qdrant]
+
+  # ── Reactive Consumer Service ────────────────────────────
+  kafka-consumer:
+    image: python:3.10-slim
+    command: >
+      bash -c "pip install pandas pyarrow kafka-python-ng qdrant-client redis requests && python /scripts/kafka_consumer.py"
+    environment:
+      VLLM_NGROK_URL: http://mock-kaggle:8001
+      EMBED_NGROK_URL: http://mock-kaggle:8001
+      QDRANT_HOST: qdrant
+      REDIS_HOST: redis
+    volumes:
+      - ./scripts:/scripts
+      - ./delta-lake:/opt/delta-lake
+    depends_on: [kafka, qdrant, redis, mock-kaggle]
 
 volumes:
   prefect_data:
